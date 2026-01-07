@@ -7,6 +7,11 @@ use JsonException;
 use RuntimeException;
 use Throwable;
 use Timeax\FortiPlugin\Installations\Support\AtomicFilesystem;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 use Timeax\FortiPlugin\Installations\Support\Psr4Checker;
 
@@ -57,22 +62,23 @@ final readonly class ProviderValidationSection
     ): array
     {
         $pluginDir = rtrim($pluginDir, "\\/");
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::PROVIDER_VALIDATION);
 
         if ($pluginDir === '' || !$this->afs->fs()->isDirectory($pluginDir)) {
             throw new RuntimeException('Provider check: valid $pluginDir is required.');
         }
 
         // Emit start
-        $start = [
-            'title' => 'PROVIDERS_CHECK_START',
-            'description' => 'Validating declared providers exist in staged plugin',
-            'meta' => [
+        $emitSignal(
+            EmitCodes::PROVIDERS_CHECK_START,
+            EmitSeverity::INFO,
+            'Validating declared providers exist in staged plugin',
+            [
                 'plugin' => $pluginName,
                 'declared_count' => count($providers),
                 'staging' => $pluginDir,
-            ],
-        ];
-        $emit($start);
+            ]
+        );
 
         // Quick exit if no providers declared
         if ($providers === []) {
@@ -82,12 +88,12 @@ final readonly class ProviderValidationSection
                 'missing' => [],
                 'files' => [],
             ]);
-            $ok = [
-                'title' => 'PROVIDERS_CHECK_OK',
-                'description' => 'No providers declared',
-                'meta' => ['declared' => 0],
-            ];
-            $emit($ok);
+            $emitSignal(
+                EmitCodes::PROVIDERS_CHECK_OK,
+                EmitSeverity::INFO,
+                'No providers declared',
+                ['declared' => 0]
+            );
             return ['status' => 'ok'];
         }
 
@@ -135,21 +141,21 @@ final readonly class ProviderValidationSection
         }
 
         if ($missing !== []) {
-            $fail = [
-                'title' => 'PROVIDERS_CHECK_FAIL',
-                'description' => 'One or more providers missing',
-                'meta' => ['missing' => $missing],
-            ];
-            $emit($fail);
+            $emitSignal(
+                EmitCodes::PROVIDERS_CHECK_FAIL,
+                EmitSeverity::ERROR,
+                'One or more providers missing',
+                ['missing' => $missing]
+            );
             return ['status' => 'fail', 'missing' => $missing];
         }
 
-        $ok = [
-            'title' => 'PROVIDERS_CHECK_OK',
-            'description' => 'All providers present in staged plugin',
-            'meta' => ['count' => count($providers)],
-        ];
-        $emit($ok);
+        $emitSignal(
+            EmitCodes::PROVIDERS_CHECK_OK,
+            EmitSeverity::INFO,
+            'All providers present in staged plugin',
+            ['count' => count($providers)]
+        );
 
         return ['status' => 'ok'];
     }

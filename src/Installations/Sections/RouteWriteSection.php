@@ -7,6 +7,11 @@ use JsonException;
 use RuntimeException;
 use Throwable;
 use Timeax\FortiPlugin\Installations\Support\AtomicFilesystem;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 use Timeax\FortiPlugin\Installations\Support\RouteMaterializer;
 use Timeax\FortiPlugin\Installations\Support\RouteRegistryStore;
@@ -59,6 +64,7 @@ final readonly class RouteWriteSection
         callable  $emit
     ): array
     {
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::ROUTE_WRITE);
         // Resolve STAGING root from installation log meta
         $doc = $this->log->read();
         $meta = (array)($doc['meta'] ?? []);
@@ -69,12 +75,12 @@ final readonly class RouteWriteSection
             throw new RuntimeException('RouteWriteSection: missing meta.paths.staging in InstallationLogStore.');
         }
 
-        $start = [
-            'title' => 'ROUTES_WRITE_START',
-            'description' => 'Materializing routes from registry',
-            'meta' => ['staging_root' => $stagingRoot, 'chunks_seen' => count($compiled)],
-        ];
-        $emit($start);
+        $emitSignal(
+            EmitCodes::ROUTES_WRITE_START,
+            EmitSeverity::INFO,
+            'Materializing routes from registry',
+            ['staging_root' => $stagingRoot, 'chunks_seen' => count($compiled)]
+        );
 
         try {
             $entries = $this->registry->read($stagingRoot);
@@ -88,12 +94,12 @@ final readonly class RouteWriteSection
                 ];
                 $this->log->writeSection('routes_write', $doc);
 
-                $okEmpty = [
-                    'title' => 'ROUTES_WRITE_OK',
-                    'description' => 'No registry entries to write',
-                    'meta' => ['dir' => $doc['dir'], 'file_count' => 0],
-                ];
-                $emit($okEmpty);
+                $emitSignal(
+                    EmitCodes::ROUTES_WRITE_OK,
+                    EmitSeverity::INFO,
+                    'No registry entries to write',
+                    ['dir' => $doc['dir'], 'file_count' => 0]
+                );
 
                 return ['status' => 'ok'] + $doc;
             }
@@ -110,21 +116,21 @@ final readonly class RouteWriteSection
 
             $this->log->writeSection('routes_write', $out);
 
-            $ok = [
-                'title' => 'ROUTES_WRITE_OK',
-                'description' => 'Routes registry materialized',
-                'meta' => ['dir' => $out['dir'], 'file_count' => count($out['files']), 'aggregator' => $out['aggregator']],
-            ];
-            $emit($ok);
+            $emitSignal(
+                EmitCodes::ROUTES_WRITE_OK,
+                EmitSeverity::INFO,
+                'Routes registry materialized',
+                ['dir' => $out['dir'], 'file_count' => count($out['files']), 'aggregator' => $out['aggregator']]
+            );
 
             return ['status' => 'ok'] + $out;
         } catch (Throwable $e) {
-            $fail = [
-                'title' => 'ROUTES_WRITE_FAIL',
-                'description' => 'Materialization error',
-                'meta' => ['exception' => $e->getMessage()],
-            ];
-            $emit($fail);
+            $emitSignal(
+                EmitCodes::ROUTES_WRITE_FAIL,
+                EmitSeverity::ERROR,
+                'Materialization error',
+                ['exception' => $e->getMessage()]
+            );
 
             $this->log->writeSection('routes_write', [
                 'error' => 'exception',

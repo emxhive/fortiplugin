@@ -5,6 +5,11 @@ namespace Timeax\FortiPlugin\Installations\Sections;
 
 use Throwable;
 use Timeax\FortiPlugin\Installations\Support\ComposerInspector;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 
 /**
@@ -49,8 +54,12 @@ final class ComposerPlanSection
         callable  $emit
     ): array
     {
-        $start = ['title' => 'COMPOSER_PLAN_START', 'description' => 'Collecting packages & computing plan'];
-        $emit($start);
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::COMPOSER_PLAN);
+        $emitSignal(
+            EmitCodes::COMPOSER_PLAN_START,
+            EmitSeverity::INFO,
+            'Collecting packages & computing plan'
+        );
 
         $pluginComposer = rtrim($pluginDir, "\\/") . DIRECTORY_SEPARATOR . 'composer.json';
         $hostLock = $hostComposerLock ?: (getcwd() . DIRECTORY_SEPARATOR . 'composer.lock');
@@ -68,12 +77,16 @@ final class ComposerPlanSection
                 'plan' => $plan->toArray(),
             ]);
 
-            $ok = ['title' => 'COMPOSER_PLAN_COMPUTED', 'description' => 'Composer plan persisted', 'meta' => [
-                'path' => $this->log->path(),
-                'packages' => count($packages),
-                'core_conflicts' => $plan->core_conflicts,
-            ]];
-            $emit($ok);
+            $emitSignal(
+                EmitCodes::COMPOSER_PLAN_COMPUTED,
+                EmitSeverity::INFO,
+                'Composer plan persisted',
+                [
+                    'path' => $this->log->path(),
+                    'packages' => count($packages),
+                    'core_conflicts' => $plan->core_conflicts,
+                ]
+            );
 
             $packagesMeta = array_map(static fn($e) => $e->toArray(), $packages);
 
@@ -87,16 +100,16 @@ final class ComposerPlanSection
 
         } catch (Throwable $e) {
             // Emit a concise failure and return
-            $fail = [
-                'title' => 'COMPOSER_PLAN_FAIL',
-                'description' => 'Failed to compute Composer plan',
-                'meta' => [
+            $emitSignal(
+                EmitCodes::COMPOSER_PLAN_FAIL,
+                EmitSeverity::ERROR,
+                'Failed to compute Composer plan',
+                [
                     'error' => $e->getMessage(),
                     'host_lock' => $hostLock,
                     'plugin_composer' => $pluginComposer,
                 ]
-            ];
-            $emit($fail);
+            );
 
             return ['status' => 'fail'];
         }

@@ -10,6 +10,11 @@ use Timeax\FortiPlugin\Installations\DTO\InstallMeta;
 use Timeax\FortiPlugin\Installations\Enums\VendorMode;
 use Timeax\FortiPlugin\Installations\InstallerPolicy;
 use Timeax\FortiPlugin\Installations\Support\AtomicFilesystem;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 
 /**
@@ -51,21 +56,22 @@ final readonly class InstallFilesSection
         callable    $emit
     ): array
     {
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::INSTALL_FILES);
         $dest = (string)($meta->paths['install'] ?? '');
         $vendorMode = $this->policy->getVendorMode();
 
         // Basic guards
-        $start = [
-            'title' => 'INSTALL_FILES_START',
-            'description' => 'Copying plugin files into install directory',
-            'meta' => [
+        $emitSignal(
+            EmitCodes::INSTALL_FILES_START,
+            EmitSeverity::INFO,
+            'Copying plugin files into install directory',
+            [
                 'placeholder_name' => $meta->placeholder_name,
                 'source' => $stagingPluginRoot,
                 'dest' => $dest,
                 'vendor_mode' => $vendorMode->value,
-            ],
-        ];
-        $emit($start);
+            ]
+        );
 
         try {
             if ($dest === '') {
@@ -101,16 +107,16 @@ final readonly class InstallFilesSection
                 'vendor_stripped' => $stripVendor,
             ]);
 
-            $ok = [
-                'title' => 'INSTALL_FILES_OK',
-                'description' => 'Plugin files copied successfully',
-                'meta' => [
+            $emitSignal(
+                EmitCodes::INSTALL_FILES_OK,
+                EmitSeverity::INFO,
+                'Plugin files copied successfully',
+                [
                     'dest' => $dest,
                     'vendor_mode' => $vendorMode->value,
                     'vendor_stripped' => $stripVendor,
-                ],
-            ];
-            $emit($ok);
+                ]
+            );
 
             return ['status' => 'ok', 'dest' => $dest, 'vendor_mode' => $vendorMode->value];
         } catch (Throwable $e) {
@@ -125,17 +131,17 @@ final readonly class InstallFilesSection
             } catch (Throwable $_) {
             }
 
-            $fail = [
-                'title' => 'INSTALL_FILES_FAIL',
-                'description' => 'Failed to copy plugin files',
-                'meta' => [
+            $emitSignal(
+                EmitCodes::INSTALL_FILES_FAIL,
+                EmitSeverity::ERROR,
+                'Failed to copy plugin files',
+                [
                     'error' => $e->getMessage(),
                     'source' => $stagingPluginRoot,
                     'dest' => $dest,
                     'vendor_mode' => $vendorMode->value,
-                ],
-            ];
-            $emit($fail);
+                ]
+            );
 
             return ['status' => 'fail'];
         }

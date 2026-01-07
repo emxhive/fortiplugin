@@ -11,8 +11,6 @@ namespace Timeax\FortiPlugin\Installations\Support;
  */
 trait EmitsEvents
 {
-    use EmitPayload;
-
     /** @var EmitterMux|null */
     protected ?EmitterMux $emitterMux = null;
 
@@ -31,7 +29,14 @@ trait EmitsEvents
     protected function emitOk(string $title, ?string $description = null, array $meta = []): void
     {
         if (!$this->emitterMux) return;
-        $payload = $this->finalize($this->makePayload($title, $description, $meta));
+        $payload = EmitPayloadFactory::make(
+            EmitStream::INSTALLER,
+            EmitPhase::DECISION,
+            $title,
+            EmitSeverity::INFO,
+            $meta,
+            $description
+        );
         $this->emitterMux->emitInstaller($payload);
     }
 
@@ -57,16 +62,23 @@ trait EmitsEvents
     ): void {
         if (!$this->emitterMux) return;
 
-        $payload = $this->merge(
-            $this->makePayload($title, $message, $meta),
-            ['error' => $this->error($code, $message, $extra)]
-        );
-
+        $data = ['error' => ['code' => $code, 'message' => $message]];
+        if ($extra !== []) {
+            $data['error']['extra'] = $extra;
+        }
         if ($filePath !== null || $size !== null) {
-            $payload['stats'] = $this->stats($filePath, $size);
+            $data['stats'] = ['filePath' => $filePath, 'size' => $size];
         }
 
-        $this->emitterMux->emitInstaller($this->finalize($payload));
+        $payload = EmitPayloadFactory::make(
+            EmitStream::INSTALLER,
+            EmitPhase::DECISION,
+            $title,
+            EmitSeverity::ERROR,
+            $data + ['meta' => $meta],
+            $message
+        );
+        $this->emitterMux->emitInstaller($payload);
     }
 
     /**
@@ -87,10 +99,18 @@ trait EmitsEvents
         ?int $size = null
     ): void {
         if (!$this->emitterMux) return;
-        $payload = $this->makePayload($title, $description, $meta);
+        $data = $meta;
         if ($filePath !== null || $size !== null) {
-            $payload['stats'] = $this->stats($filePath, $size);
+            $data['stats'] = ['filePath' => $filePath, 'size' => $size];
         }
-        $this->emitterMux->emitValidation($this->finalize($payload));
+        $payload = EmitPayloadFactory::make(
+            EmitStream::VALIDATION,
+            EmitPhase::VALIDATION_FINALIZE,
+            $title,
+            EmitSeverity::INFO,
+            $data,
+            $description
+        );
+        $this->emitterMux->emitValidation($payload);
     }
 }

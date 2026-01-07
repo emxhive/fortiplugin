@@ -6,6 +6,11 @@ namespace Timeax\FortiPlugin\Installations\Sections;
 use Illuminate\Support\Str;
 use Throwable;
 use Timeax\FortiPlugin\Installations\DTO\InstallMeta;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\AtomicFilesystem;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 use Timeax\FortiPlugin\Installations\Support\Psr4Checker;
@@ -32,19 +37,21 @@ final readonly class InternalConfigWriteSection
         callable    $emit,
     ): array
     {
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::INTERNAL_CONFIG);
         $target = rtrim($stagingPluginRoot, "\\/")
             . DIRECTORY_SEPARATOR . '.internal'
             . DIRECTORY_SEPARATOR . 'Config.php';
 
-        $emit([
-            'title' => 'INTERNAL_CONFIG_START',
-            'description' => 'Writing .internal/Config.php from stub',
-            'meta' => [
+        $emitSignal(
+            EmitCodes::INTERNAL_CONFIG_START,
+            EmitSeverity::INFO,
+            'Writing .internal/Config.php from stub',
+            [
                 'staging' => $stagingPluginRoot,
                 'target' => $target,
                 'plugin_id' => $pluginId,
-            ],
-        ]);
+            ]
+        );
 
         try {
             // Namespace prefix (project standard helper)
@@ -74,11 +81,12 @@ final readonly class InternalConfigWriteSection
                 'namespace' => $pluginNamespace,
             ]);
 
-            $emit([
-                'title' => 'INTERNAL_CONFIG_OK',
-                'description' => 'Wrote .internal/Config.php',
-                'meta' => ['path' => $target],
-            ]);
+            $emitSignal(
+                EmitCodes::INTERNAL_CONFIG_OK,
+                EmitSeverity::INFO,
+                'Wrote .internal/Config.php',
+                ['path' => $target]
+            );
 
             return ['status' => 'ok', 'path' => $target];
         } catch (Throwable $e) {
@@ -93,11 +101,12 @@ final readonly class InternalConfigWriteSection
                 // best-effort like other sections
             }
 
-            $emit([
-                'title' => 'INTERNAL_CONFIG_FAIL',
-                'description' => 'Failed to write .internal/Config.php',
-                'meta' => ['error' => $e->getMessage()],
-            ]);
+            $emitSignal(
+                EmitCodes::INTERNAL_CONFIG_FAIL,
+                EmitSeverity::ERROR,
+                'Failed to write .internal/Config.php',
+                ['error' => $e->getMessage()]
+            );
 
             return ['status' => 'fail'];
         }

@@ -9,6 +9,11 @@ use Throwable;
 use Timeax\FortiPlugin\Installations\Contracts\PluginRepository;
 use Timeax\FortiPlugin\Installations\DTO\InstallMeta;
 use Timeax\FortiPlugin\Installations\DTO\PackageEntry;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 
 /**
@@ -55,19 +60,18 @@ final readonly class DbPersistSection
         ?array      $packages = null
     ): array
     {
-
-        $payload = [
-            'title' => 'DB_PERSIST_START',
-            'description' => 'Persisting plugin + version',
-            'meta' => [
+        $emitSignal = EmitPayloadFactory::emitter($emit, EmitStream::INSTALLER, EmitPhase::DB_PERSIST);
+        $emitSignal(
+            EmitCodes::DB_PERSIST_START,
+            EmitSeverity::INFO,
+            'Persisting plugin + version',
+            [
                 'placeholder_name' => $meta->placeholder_name,
                 'placeholder_slug' => $meta->placeholder_slug,
                 'zip_id' => (string)$zipId,
                 'version_tag' => $versionTag,
-            ],
-        ];
-
-        $emit($payload);
+            ]
+        );
 
 
         try {
@@ -104,15 +108,15 @@ final readonly class DbPersistSection
                 'packages_saved' => is_array($packages) && $packages !== [],
             ]);
 
-            $okEmit = [
-                'title' => 'DB_PERSIST_OK',
-                'description' => 'Plugin + version persisted and zip linked',
-                'meta' => [
+            $emitSignal(
+                EmitCodes::DB_PERSIST_OK,
+                EmitSeverity::INFO,
+                'Plugin + version persisted and zip linked',
+                [
                     'plugin_id' => $pluginId,
                     'plugin_version_id' => $pluginVersionId,
-                ],
-            ];
-            $emit($okEmit);
+                ]
+            );
 
             return ['status' => 'ok', 'plugin_id' => $pluginId, 'plugin_version_id' => $pluginVersionId];
         } catch (Throwable $e) {
@@ -130,12 +134,12 @@ final readonly class DbPersistSection
             } catch (Throwable $_) {
             }
 
-            $failEmit = [
-                'title' => 'DB_PERSIST_FAIL',
-                'description' => 'Failed to persist DB records',
-                'meta' => $failMeta,
-            ];
-            $emit($failEmit);
+            $emitSignal(
+                EmitCodes::DB_PERSIST_FAIL,
+                EmitSeverity::ERROR,
+                'Failed to persist DB records',
+                $failMeta
+            );
 
             return ['status' => 'fail'];
         }

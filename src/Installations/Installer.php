@@ -25,6 +25,11 @@ use Timeax\FortiPlugin\Installations\Sections\VendorPolicySection;
 use Timeax\FortiPlugin\Installations\Sections\VerificationSection;
 use Timeax\FortiPlugin\Installations\Sections\ZipValidationGate;
 use Timeax\FortiPlugin\Installations\Support\AtomicFilesystem;
+use Timeax\FortiPlugin\Installations\Support\EmitCodes;
+use Timeax\FortiPlugin\Installations\Support\EmitPayloadFactory;
+use Timeax\FortiPlugin\Installations\Support\EmitPhase;
+use Timeax\FortiPlugin\Installations\Support\EmitSeverity;
+use Timeax\FortiPlugin\Installations\Support\EmitStream;
 use Timeax\FortiPlugin\Installations\Support\InstallationLogStore;
 use Timeax\FortiPlugin\Installations\Support\InstallerTokenManager;
 use Timeax\FortiPlugin\Installations\Support\RouteUiBridge;
@@ -118,6 +123,34 @@ final readonly class Installer
             if ($emit) $emit($p);
         };
 
+        $installerEmitter = static fn(string $phase, string $defaultSeverity = EmitSeverity::INFO) => EmitPayloadFactory::emitter(
+            $emitInstaller,
+            EmitStream::INSTALLER,
+            $phase,
+            $defaultSeverity
+        );
+        $validationEmitter = static fn(string $phase, string $defaultSeverity = EmitSeverity::INFO) => EmitPayloadFactory::emitter(
+            $emitValidation,
+            EmitStream::VALIDATION,
+            $phase,
+            $defaultSeverity
+        );
+
+        $emitPreflight = $installerEmitter(EmitPhase::PREFLIGHT);
+        $emitDecision = $installerEmitter(EmitPhase::DECISION);
+        $emitZipGate = $installerEmitter(EmitPhase::ZIP_VALIDATION);
+        $emitProvider = $installerEmitter(EmitPhase::PROVIDER_VALIDATION);
+        $emitVendorPolicy = $installerEmitter(EmitPhase::VENDOR_POLICY);
+        $emitComposerPlan = $installerEmitter(EmitPhase::COMPOSER_PLAN);
+        $emitDb = $installerEmitter(EmitPhase::DB_PERSIST);
+        $emitRouteDiscovery = $installerEmitter(EmitPhase::ROUTE_DISCOVERY);
+        $emitRouteCompile = $installerEmitter(EmitPhase::ROUTE_COMPILE);
+        $emitRouteWrite = $installerEmitter(EmitPhase::ROUTE_WRITE);
+        $emitInternalConfig = $installerEmitter(EmitPhase::INTERNAL_CONFIG);
+        $emitInstallFiles = $installerEmitter(EmitPhase::INSTALL_FILES);
+        $emitPublishAssets = $installerEmitter(EmitPhase::PUBLISH_ASSETS);
+        $emitUiConfig = $installerEmitter(EmitPhase::UI_CONFIG);
+
         $pluginDir = (string)($meta->paths['staging'] ?? '');
         if ($pluginDir === '') {
             throw new RuntimeException('InstallMeta.paths.staging is required.');
@@ -146,22 +179,24 @@ final readonly class Installer
             try {
                 $claims = $this->tokens->validate($installerToken);
             } catch (Throwable $e) {
-                $emitInstaller([
-                    'title' => 'INSTALLER_TOKEN_INVALID',
-                    'description' => 'Installer override token invalid or expired',
-                    'meta' => ['zip_id' => (string)$zipId, 'reason' => $e->getMessage()],
-                ]);
+                $emitPreflight(
+                    EmitCodes::INSTALLER_TOKEN_INVALID,
+                    EmitSeverity::ERROR,
+                    'Installer override token invalid or expired',
+                    ['zip_id' => (string)$zipId, 'reason' => $e->getMessage()]
+                );
                 // Treat as ASK (UI should re-request confirmation or new token)
                 return $this->emitAsk($emitInstaller, null, ['reason' => 'token_invalid']);
             }
 
             // Purpose & run parity
             if (($claims->purpose ?? null) !== 'install_override' || ($claims->run_id ?? null) !== $runId) {
-                $emitInstaller([
-                    'title' => 'INSTALLER_TOKEN_MISMATCH',
-                    'description' => 'Token purpose or run_id mismatch',
-                    'meta' => ['expected_run' => $runId, 'token_run' => $claims->run_id ?? null, 'purpose' => $claims->purpose ?? null],
-                ]);
+                $emitPreflight(
+                    EmitCodes::INSTALLER_TOKEN_MISMATCH,
+                    EmitSeverity::ERROR,
+                    'Token purpose or run_id mismatch',
+                    ['expected_run' => $runId, 'token_run' => $claims->run_id ?? null, 'purpose' => $claims->purpose ?? null]
+                );
                 return $this->emitAsk($emitInstaller, null, ['reason' => 'token_mismatch']);
             }
 
@@ -171,11 +206,12 @@ final readonly class Installer
             $hasFileScanAsk = $this->hasDecisionAskForRun($doc, $runId);
 
             if (!$hasVerificationOk || !$hasFileScanAsk) {
-                $emitInstaller([
-                    'title' => 'RESUME_PRECHECK_FAILED',
-                    'description' => 'Logs do not confirm prior verification OK and ASK decision for this run',
-                    'meta' => ['verification_ok' => $hasVerificationOk, 'ask_for_run' => $hasFileScanAsk, 'run_id' => $runId],
-                ]);
+                $emitPreflight(
+                    EmitCodes::RESUME_PRECHECK_FAILED,
+                    EmitSeverity::ERROR,
+                    'Logs do not confirm prior verification OK and ASK decision for this run',
+                    ['verification_ok' => $hasVerificationOk, 'ask_for_run' => $hasFileScanAsk, 'run_id' => $runId]
+                );
                 return $this->emitAsk($emitInstaller, null, ['reason' => 'precheck_failed']);
             }
 
@@ -347,11 +383,12 @@ final readonly class Installer
                     emit: $emitInstaller
                 );
             } else {
-                $emitInstaller([
-                    'title' => 'ROUTES_NONE_DISCOVERED',
-                    'description' => 'No route files discovered or compiled',
-                    'meta' => ['plugin_dir' => $pluginDir],
-                ]);
+                $emitRouteDiscovery(
+                    EmitCodes::ROUTES_NONE_DISCOVERED,
+                    EmitSeverity::WARNING,
+                    'No route files discovered or compiled',
+                    ['plugin_dir' => $pluginDir]
+                );
             }
 
             DB::commit();
@@ -371,11 +408,12 @@ final readonly class Installer
 
         } catch (Throwable $e) {
             DB::rollBack();
-            $emitInstaller([
-                'title' => 'DB_TRANSACTION_ROLLBACK',
-                'description' => 'Persistence or route write failed; rolled back',
-                'meta' => ['exception' => $e->getMessage()],
-            ]);
+            $emitDb(
+                EmitCodes::DB_TRANSACTION_ROLLBACK,
+                EmitSeverity::ERROR,
+                'Persistence or route write failed; rolled back',
+                ['exception' => $e->getMessage()]
+            );
             return InstallerResult::fromArray([
                 'status' => 'fail',
                 'summary' => $summary,
@@ -391,7 +429,11 @@ final readonly class Installer
             emit: $emitInstaller
         );
         if (($file_result['status'] ?? 'fail') !== 'ok') {
-            $emitInstaller(['title' => 'INSTALL_FILES_FAIL', 'description' => 'Failed moving staged files into place']);
+            $emitInstallFiles(
+                EmitCodes::INSTALL_FILES_FAIL,
+                EmitSeverity::ERROR,
+                'Failed moving staged files into place'
+            );
             return InstallerResult::fromArray([
                 'status' => 'fail',
                 'summary' => $summary,
@@ -410,11 +452,12 @@ final readonly class Installer
         );
 
         if (($pub['status'] ?? 'fail') === 'fail') {
-            $emitInstaller([
-                'title' => 'UI_BUILD_PUBLISH_FAIL',
-                'description' => 'Failed publishing embed UI public assets',
-                'meta' => ['plugin_id' => (int)$pluginId],
-            ]);
+            $emitPublishAssets(
+                EmitCodes::UI_BUILD_PUBLISH_FAIL,
+                EmitSeverity::ERROR,
+                'Failed publishing embed UI public assets',
+                ['plugin_id' => (int)$pluginId]
+            );
 
             return InstallerResult::fromArray([
                 'status' => 'fail',
@@ -475,12 +518,14 @@ final readonly class Installer
 
     private function emitAsk(callable $emit, ?InstallSummary $summary, array $meta): InstallerResult
     {
-        $payload = [
-            'title' => 'INSTALLATION_ASK',
-            'description' => 'Installation paused for host decision',
-            'meta' => $meta,
-        ];
-        $emit($payload);
+        $emit(EmitPayloadFactory::make(
+            EmitStream::INSTALLER,
+            EmitPhase::DECISION,
+            EmitCodes::INSTALLATION_ASK,
+            EmitSeverity::WARNING,
+            $meta,
+            'Installation paused for host decision'
+        ));
 
         return InstallerResult::fromArray([
             'status' => 'ask',
@@ -491,12 +536,14 @@ final readonly class Installer
 
     private function emitBreak(callable $emit, ?InstallSummary $summary, array $meta): InstallerResult
     {
-        $payload = [
-            'title' => 'INSTALLATION_BREAK',
-            'description' => 'Installation halted by policy',
-            'meta' => $meta,
-        ];
-        $emit($payload);
+        $emit(EmitPayloadFactory::make(
+            EmitStream::INSTALLER,
+            EmitPhase::DECISION,
+            EmitCodes::INSTALLATION_BREAK,
+            EmitSeverity::ERROR,
+            $meta,
+            'Installation halted by policy'
+        ));
 
         return InstallerResult::fromArray([
             'status' => 'break',
